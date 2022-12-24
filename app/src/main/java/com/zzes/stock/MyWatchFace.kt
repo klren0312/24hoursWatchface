@@ -4,23 +4,26 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
-import android.graphics.Bitmap
-import android.graphics.Canvas
-import android.graphics.Color
-import android.graphics.Paint
-import android.graphics.Rect
+import android.graphics.*
+import android.hardware.Sensor
+import android.hardware.SensorEvent
+import android.hardware.SensorEventListener
+import android.hardware.SensorManager
 import android.os.Bundle
 import android.os.Handler
 import android.os.Message
 import android.support.wearable.watchface.CanvasWatchFaceService
 import android.support.wearable.watchface.WatchFaceService
 import android.support.wearable.watchface.WatchFaceStyle
+import android.util.Log
 import android.view.SurfaceHolder
 import android.widget.Toast
-
 import java.lang.ref.WeakReference
-import java.util.Calendar
-import java.util.TimeZone
+import java.util.*
+import kotlin.math.cos
+import kotlin.math.floor
+import kotlin.math.sin
+
 
 /**
  * Updates rate in milliseconds for interactive mode. We update once a second to advance the
@@ -47,7 +50,7 @@ private const val SHADOW_RADIUS = 6f
  * mode. The watch face is drawn with less contrast in mute mode.
  *
  *
- * Important Note: Because watch face apps do not have a default Activity in
+ * Important Note : Because watch face apps do not have a default Activity in
  * their project, you will need to set your Configurations to
  * "Do not launch Activity" for both the Wear and/or Application modules. If you
  * are unsure how to do this, please review the "Run Starter project" section
@@ -74,8 +77,12 @@ class MyWatchFace : CanvasWatchFaceService() {
     }
 
     inner class Engine : CanvasWatchFaceService.Engine() {
+        private lateinit var mSensorManager: SensorManager
+        private lateinit var listener: SensorEventListener
+        private var sensorRotate: Float = 0F
 
         private lateinit var mCalendar: Calendar
+
         private var cTimeArr = arrayListOf("子", "丑", "寅", "卯", "辰", "巳", "午", "未", "申", "酉", "戌", "亥")
         private var mRegisteredTimeZoneReceiver = false
         private var mMuteMode: Boolean = false
@@ -97,10 +104,8 @@ class MyWatchFace : CanvasWatchFaceService() {
         private lateinit var mTickHourTextPaint: Paint
         private lateinit var mTickLunarTextPaint: Paint
         private lateinit var mTickGuaTextPaint: Paint
-
+        private lateinit var mDirectionPaint: Paint
         private lateinit var mBackgroundPaint: Paint
-        private lateinit var mBackgroundBitmap: Bitmap
-        private lateinit var mGrayBackgroundBitmap: Bitmap
 
         private var mAmbient: Boolean = false
         private var mLowBitAmbient: Boolean = false
@@ -126,9 +131,48 @@ class MyWatchFace : CanvasWatchFaceService() {
             )
 
             mCalendar = Calendar.getInstance()
-
+            initServices()
             initializeBackground()
             initializeWatchFace()
+        }
+
+        private fun initServices() {
+            // sensor manager
+            mSensorManager = getSystemService(SENSOR_SERVICE) as SensorManager
+            val accelerometerSensor: Sensor =
+                mSensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
+            val magneticSensor: Sensor = mSensorManager.getDefaultSensor(Sensor.TYPE_MAGNETIC_FIELD)
+            listener = object : SensorEventListener {
+                var accelerometerValues = FloatArray(3)
+                var magneticValues = FloatArray(3)
+                override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
+                override fun onSensorChanged(event: SensorEvent) {
+                    // 判断当前是加速度传感器还是地磁传感器
+                    if (event.sensor.type == Sensor.TYPE_ACCELEROMETER) {
+                        // 注意赋值时要调用clone()方法
+                        accelerometerValues = event.values.clone()
+                    } else if (event.sensor.type == Sensor.TYPE_MAGNETIC_FIELD) {
+                        // 注意赋值时要调用clone()方法
+                        magneticValues = event.values.clone()
+                    }
+                    val rData = FloatArray(9)
+                    val values = FloatArray(3)
+                    SensorManager.getRotationMatrix(rData, null, accelerometerValues, magneticValues)
+                    SensorManager.getOrientation(rData, values)
+                    sensorRotate = Math.toDegrees(values[0].toDouble()).toFloat()
+//                    Log.d("MainActivity", "value[0] is " + Math.toDegrees(values[0].toDouble()))
+                }
+            }
+            mSensorManager.registerListener(
+                listener,
+                accelerometerSensor,
+                SensorManager.SENSOR_DELAY_GAME
+            )
+            mSensorManager.registerListener(
+                listener,
+                magneticSensor,
+                SensorManager.SENSOR_DELAY_GAME
+            )
         }
 
         private fun initializeBackground() {
@@ -183,6 +227,16 @@ class MyWatchFace : CanvasWatchFaceService() {
                 )
             }
 
+            mDirectionPaint = Paint().apply {
+                color = mWatchHandColor
+                strokeWidth = SECOND_TICK_STROKE_WIDTH
+                isAntiAlias = true
+                style = Paint.Style.STROKE
+                setShadowLayer(
+                    SHADOW_RADIUS, 0f, 0f, mWatchHandShadowColor
+                )
+            }
+
             mTickLunarTextPaint = Paint().apply {
                 color = mWatchHandColor
                 strokeWidth = SECOND_TICK_STROKE_WIDTH
@@ -207,6 +261,7 @@ class MyWatchFace : CanvasWatchFaceService() {
         override fun onDestroy() {
             mUpdateTimeHandler.removeMessages(MSG_UPDATE_TIME)
             super.onDestroy()
+            mSensorManager.unregisterListener(listener)
         }
 
         override fun onPropertiesChanged(properties: Bundle) {
@@ -241,6 +296,7 @@ class MyWatchFace : CanvasWatchFaceService() {
                 mMinutePaint.color = Color.WHITE
                 mSecondPaint.color = Color.WHITE
                 mTickHourTextPaint.color = Color.WHITE
+                mDirectionPaint.color = Color.WHITE
                 mTickLunarTextPaint.color = Color.WHITE
                 mTickGuaTextPaint.color = Color.WHITE
 
@@ -248,6 +304,7 @@ class MyWatchFace : CanvasWatchFaceService() {
                 mMinutePaint.isAntiAlias = false
                 mSecondPaint.isAntiAlias = false
                 mTickHourTextPaint.isAntiAlias = false
+                mDirectionPaint.isAntiAlias = false
                 mTickLunarTextPaint.isAntiAlias = false
                 mTickGuaTextPaint.isAntiAlias = false
 
@@ -255,6 +312,7 @@ class MyWatchFace : CanvasWatchFaceService() {
                 mMinutePaint.clearShadowLayer()
                 mSecondPaint.clearShadowLayer()
                 mTickHourTextPaint.clearShadowLayer()
+                mDirectionPaint.clearShadowLayer()
                 mTickLunarTextPaint.clearShadowLayer()
                 mTickGuaTextPaint.clearShadowLayer()
 
@@ -263,6 +321,7 @@ class MyWatchFace : CanvasWatchFaceService() {
                 mMinutePaint.color = mWatchHandColor
                 mSecondPaint.color = mWatchHandHighlightColor
                 mTickHourTextPaint.color = mWatchHandColor
+                mDirectionPaint.color = mWatchHandColor
                 mTickLunarTextPaint.color = mWatchHandColor
                 mTickGuaTextPaint.color = mWatchHandColor
 
@@ -270,6 +329,7 @@ class MyWatchFace : CanvasWatchFaceService() {
                 mMinutePaint.isAntiAlias = true
                 mSecondPaint.isAntiAlias = true
                 mTickHourTextPaint.isAntiAlias = true
+                mDirectionPaint.isAntiAlias = true
                 mTickLunarTextPaint.isAntiAlias = true
                 mTickGuaTextPaint.isAntiAlias = true
 
@@ -280,6 +340,9 @@ class MyWatchFace : CanvasWatchFaceService() {
                     SHADOW_RADIUS, 0f, 0f, mWatchHandShadowColor
                 )
                 mSecondPaint.setShadowLayer(
+                    SHADOW_RADIUS, 0f, 0f, mWatchHandShadowColor
+                )
+                mTickHourTextPaint.setShadowLayer(
                     SHADOW_RADIUS, 0f, 0f, mWatchHandShadowColor
                 )
                 mTickHourTextPaint.setShadowLayer(
@@ -440,11 +503,11 @@ class MyWatchFace : CanvasWatchFaceService() {
         private fun getTimeStr(): String {
             var hour = mCalendar.get(Calendar.HOUR_OF_DAY)
 
-            return "子丑寅卯辰巳午未申酉戌亥"[Math.floor((((hour+1)%24)/2).toDouble()).toInt()] + "时"
+            return "子丑寅卯辰巳午未申酉戌亥"[floor((((hour+1)%24)/2).toDouble()).toInt()] + "时"
         }
 
-        private fun drawWatchFace(canvas: Canvas) {
 
+        private fun drawWatchFace(canvas: Canvas) {
             /*
              * Draw ticks. Usually you will want to bake this directly into the photo, but in
              * cases where you want to allow users to select their own photos, this dynamically
@@ -468,7 +531,6 @@ class MyWatchFace : CanvasWatchFaceService() {
                 canvas.restore()
             }
 
-
             for (tickIndex in 0..23) {
                 canvas.save()
                 canvas.translate(mCenterX, mCenterY)
@@ -485,6 +547,18 @@ class MyWatchFace : CanvasWatchFaceService() {
                 canvas.restore()
             }
 
+            mDirectionPaint.textSize = 20f
+            mDirectionPaint.textAlign = Paint.Align.CENTER
+            mDirectionPaint.color = Color.parseColor("#67C23A")
+            var directionArr = arrayListOf("坎","艮","震","巽","离","坤","兑","乾")
+            for (tickIndex in 0..7) {
+                canvas.save()
+                canvas.translate(mCenterX, mCenterY)
+                canvas.rotate((45.toDouble() * tickIndex).toFloat() + sensorRotate)
+                canvas.drawText(directionArr[tickIndex],
+                    0f, -mCenterY/1.3f , mDirectionPaint)
+                canvas.restore()
+            }
             /*
              * These calculations reflect the rotation in degrees per unit of time, e.g.,
              * 360 / 60 = 6 and 360 / 12 = 30.
