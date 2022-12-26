@@ -159,7 +159,8 @@ class MyWatchFace : CanvasWatchFaceService() {
                     val values = FloatArray(3)
                     SensorManager.getRotationMatrix(rData, null, accelerometerValues, magneticValues)
                     SensorManager.getOrientation(rData, values)
-                    sensorRotate = Math.toDegrees(values[0].toDouble()).toFloat()
+                    val degrees = Math.toDegrees(values[0].toDouble()).toFloat()
+                    sensorRotate = (degrees + 360f) % 360f
 //                    Log.d("MainActivity", "value[0] is " + Math.toDegrees(values[0].toDouble()))
                 }
             }
